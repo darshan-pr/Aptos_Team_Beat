@@ -10,7 +10,6 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.2.2-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind%20CSS-3.4.3-38B2AC?logo=tailwind-css)](https://tailwindcss.com/)
 
-![Aptos Logo](public/aptos.png)
 
 </div>
 
