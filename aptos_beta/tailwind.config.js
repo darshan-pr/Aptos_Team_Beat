@@ -70,8 +70,9 @@ module.exports = {
         "accordion-up": "accordion-up 0.2s ease-out",
       },
       fontFamily: {
-        sans: ["sans-serif"],
-        inter: ["Inter", "sans-serif"],
+        sans: ["var(--font-inter)", "sans-serif"],
+        inter: ["var(--font-inter)", "sans-serif"],
+        playfair: ["var(--font-playfair)", "serif"],
       },
       fontSize: {
         12: "0.75rem",
