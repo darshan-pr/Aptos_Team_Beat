@@ -20,12 +20,19 @@ import {
   Zap,
   RefreshCw
 } from "lucide-react";
+import { useWallet } from "@aptos-labs/wallet-adapter-react";
+import { completeMilestone } from "@/entry-functions/completeMilestone";
+import { verifyMilestone } from "@/entry-functions/verifyMilestone";
+import { releaseMilestoneFunds } from "@/entry-functions/releaseMilestoneFunds";
+import { getMilestoneDetails } from "@/view-functions/charitableFunding";
 
 export function TrackFunds() {
   const { toast } = useToast();
+  const { account, signAndSubmitTransaction } = useWallet();
   const [selectedProject, setSelectedProject] = useState<string>("");
   const [projects, setProjects] = useState<Project[]>([]);
   const [emergencyReason, setEmergencyReason] = useState<string>("");
+  const [isProcessing, setIsProcessing] = useState<boolean>(false);
 
   useEffect(() => {
     const allProjects = projectStore.getAllProjects();
@@ -107,26 +114,164 @@ export function TrackFunds() {
     return "Locked in Escrow";
   };
 
-  const handleRefreshFundRelease = (milestoneId: string) => {
-    if (!currentProject) return;
+  const handleCompleteMilestone = async (milestoneId: string) => {
+    if (!currentProject || !account?.address) return;
 
-    const result = projectStore.refreshFundRelease(currentProject.id, milestoneId);
-    
-    if (result.success) {
-      toast({
-        title: "Fund Release Successful! 💰",
-        description: result.message
+    setIsProcessing(true);
+
+    try {
+      // Convert milestone ID to the projectId:milestoneId format for blockchain
+      const transaction = completeMilestone({
+        projectId: parseInt(currentProject.id, 10), 
+        milestoneId: parseInt(milestoneId, 10),
       });
-      
+
+      // Submit the transaction to the blockchain
+      const result = await signAndSubmitTransaction(transaction);
+      console.log("Milestone completion transaction submitted:", result);
+
+      // After blockchain transaction is successful, update local state
+      // For now, we'll just refresh the projects list since we don't have the specific method
+      toast({
+        title: "Milestone Marked as Completed! 🎉",
+        description: "The milestone has been marked as completed on the blockchain and awaits verification."
+      });
+
       // Refresh data
       const updatedProjects = projectStore.getAllProjects();
       setProjects(updatedProjects);
-    } else {
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Something went wrong. Please try again.";
+      console.error("Milestone completion error:", error);
       toast({
-        title: "Release Failed",
-        description: result.message,
+        title: "Completion Failed",
+        description: errorMessage,
         variant: "destructive"
       });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleVerifyMilestone = async (milestoneId: string) => {
+    if (!currentProject || !account?.address) return;
+
+    setIsProcessing(true);
+
+    try {
+      // Create the transaction payload
+      const transaction = verifyMilestone({
+        projectId: parseInt(currentProject.id, 10),
+        milestoneId: parseInt(milestoneId, 10),
+      });
+
+      // Submit the transaction to the blockchain
+      const result = await signAndSubmitTransaction(transaction);
+      console.log("Milestone verification transaction submitted:", result);
+
+      // After blockchain transaction is successful, update local state
+      // For now, we'll just refresh the projects list since we don't have the specific method
+      toast({
+        title: "Milestone Verified! ✅",
+        description: "You have successfully verified this milestone on the blockchain."
+      });
+
+      // Refresh data
+      const updatedProjects = projectStore.getAllProjects();
+      setProjects(updatedProjects);
+
+      // Check if verification count is now 2 or more, if so, show a message about release
+      try {
+        const blockchainMilestone = await getMilestoneDetails(
+          parseInt(currentProject.id, 10), 
+          parseInt(milestoneId, 10)
+        );
+
+        if (blockchainMilestone.verificationCount >= 2) {
+          toast({
+            title: "Milestone Ready for Fund Release! 💰",
+            description: "This milestone has received enough verifications and funds can now be released."
+          });
+        }
+      } catch (error) {
+        console.log("Could not fetch milestone details for verification count check");
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Something went wrong. Please try again.";
+      console.error("Milestone verification error:", error);
+      toast({
+        title: "Verification Failed",
+        description: errorMessage,
+        variant: "destructive"
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleRefreshFundRelease = async (milestoneId: string) => {
+    if (!currentProject || !account?.address) return;
+
+    setIsProcessing(true);
+
+    try {
+      // Check if fund release is valid in local state
+      const validation = projectStore.getFundReleaseValidation(currentProject.id, milestoneId);
+      
+      if (!validation.isValid) {
+        toast({
+          title: "Release Validation Failed",
+          description: validation.message,
+          variant: "destructive"
+        });
+        return;
+      }
+      
+      // Create the transaction payload
+      const transaction = releaseMilestoneFunds({
+        projectId: parseInt(currentProject.id, 10),
+        milestoneId: parseInt(milestoneId, 10),
+      });
+
+      toast({
+        title: "Initiating Fund Release",
+        description: "Submitting transaction to blockchain...",
+      });
+      
+      // Submit the transaction to the blockchain
+      const result = await signAndSubmitTransaction(transaction);
+      console.log("Fund release transaction submitted:", result);
+      
+      // Execute the fund release in local state
+      const localResult = projectStore.refreshFundRelease(currentProject.id, milestoneId);
+      
+      if (localResult.success) {
+        toast({
+          title: "Fund Release Successful! 💰",
+          description: `${localResult.message} Transaction confirmed on blockchain.`
+        });
+        
+        // Refresh data
+        const updatedProjects = projectStore.getAllProjects();
+        setProjects(updatedProjects);
+      } else {
+        toast({
+          title: "Release Failed",
+          description: localResult.message,
+          variant: "destructive"
+        });
+      }
+    } catch (error) {
+      console.error("Fund release error:", error);
+      const errorMessage = error instanceof Error ? error.message : "An error occurred during fund release.";
+      
+      toast({
+        title: "Release Failed",
+        description: errorMessage,
+        variant: "destructive"
+      });
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -409,6 +554,39 @@ export function TrackFunds() {
                     </div>
                   </div>
 
+                  {/* Actions for milestone */}
+                  {!milestone.isCompleted && !milestone.escrowReleased && (
+                    <div className="mt-4">
+                      <Button 
+                        onClick={() => handleCompleteMilestone(milestone.id)}
+                        variant="outline" 
+                        size="sm"
+                        className="text-blue-600 border-blue-600 hover:bg-blue-50"
+                        disabled={isProcessing}
+                      >
+                        <CheckCircle className="h-4 w-4 mr-2" />
+                        Mark as Complete
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Verification button for completed but not verified milestones */}
+                  {milestone.isCompleted && !milestone.escrowReleased && 
+                   milestone.verificationStatus !== 'verified' && (
+                    <div className="mt-4">
+                      <Button 
+                        onClick={() => handleVerifyMilestone(milestone.id)}
+                        variant="outline" 
+                        size="sm"
+                        className="text-green-600 border-green-600 hover:bg-green-50"
+                        disabled={isProcessing}
+                      >
+                        <CheckCircle className="h-4 w-4 mr-2" />
+                        Verify Milestone
+                      </Button>
+                    </div>
+                  )}
+
                       {/* Fund Release Validation Status */}
                       {validationInfo && !milestone.escrowReleased && milestone.isCompleted && (
                         <div className="mt-3 pt-3 border-t border-gray-100">
@@ -427,6 +605,7 @@ export function TrackFunds() {
                                     onClick={() => handleRefreshFundRelease(milestone.id)}
                                     className="h-6 px-2 text-xs text-blue-600 border-blue-600 hover:bg-blue-50"
                                     title="Retry fund release - useful when escrow balance has increased"
+                                    disabled={isProcessing}
                                   >
                                     <RefreshCw className="h-3 w-3 mr-1" />
                                     Retry Release
@@ -491,6 +670,7 @@ export function TrackFunds() {
                                   size="sm"
                                   onClick={() => handleAddTestDonation(milestone.id)}
                                   className="text-xs h-6 px-2 text-green-600 border-green-600 hover:bg-green-50"
+                                  disabled={isProcessing}
                                 >
                                   Add Test Donation ($5,000)
                                 </Button>
@@ -521,7 +701,7 @@ export function TrackFunds() {
                               variant="outline" 
                               size="sm" 
                               className="text-red-600 border-red-600 hover:bg-red-50"
-                              disabled={escrowTotal < milestone.fundingAmount}
+                              disabled={escrowTotal < milestone.fundingAmount || isProcessing}
                             >
                               <Zap className="h-4 w-4 mr-1" />
                               Emergency Release
@@ -597,7 +777,7 @@ export function TrackFunds() {
                                       onClick={() => handleEmergencyRelease(milestone.id)}
                                       variant="destructive"
                                       className="flex-1"
-                                      disabled={!emergencyReason.trim()}
+                                      disabled={!emergencyReason.trim() || isProcessing}
                                     >
                                       <Zap className="h-4 w-4 mr-2" />
                                       Release ${milestone.fundingAmount.toLocaleString()} Now

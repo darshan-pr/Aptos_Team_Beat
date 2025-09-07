@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
 import { projectStore, type Milestone, type ProjectImage } from "@/lib/projectStore";
+import { useWallet } from "@aptos-labs/wallet-adapter-react";
+import { createProject } from "@/entry-functions/createProject";
 import { 
   Target, 
   Calendar,
@@ -71,6 +73,9 @@ export function RequestFunding() {
     ));
   };
 
+  // Get wallet functions from wallet adapter
+  const { signAndSubmitTransaction } = useWallet();
+
   const handleSubmit = async () => {
     if (!projectTitle || !projectDescription || !totalFunding) {
       toast({
@@ -84,7 +89,22 @@ export function RequestFunding() {
     setIsSubmitting(true);
 
     try {
-      // Convert form data to project format
+      // Prepare data for blockchain transaction
+      const totalFundingRequired = parseFloat(totalFunding) * 10**8; // Convert to octas (blockchain amount format)
+      
+      // Create the transaction payload
+      const transaction = createProject({
+        title: projectTitle,
+        description: projectDescription,
+        totalFundingRequired: totalFundingRequired,
+      });
+
+      // Submit the transaction to the blockchain
+      const result = await signAndSubmitTransaction(transaction);
+      console.log("Transaction submitted:", result);
+
+      // After blockchain transaction is successful, store in local state
+      // Convert form data to project format for local state
       const projectImages: ProjectImage[] = imageUrls
         .filter(url => url.trim())
         .map(url => ({
@@ -105,6 +125,7 @@ export function RequestFunding() {
         escrowReleased: false
       }));
 
+      // Create the project in local state (after blockchain confirmation)
       const newProject = projectStore.createProject({
         title: projectTitle,
         description: projectDescription,
@@ -121,7 +142,7 @@ export function RequestFunding() {
 
       toast({
         title: "Project Created Successfully! 🎉",
-        description: `Your project "${projectTitle}" has been created and is now live on the platform with ID: ${newProject.id}`
+        description: `Your project "${projectTitle}" has been created on the blockchain and is now live on the platform with ID: ${newProject.id}`
       });
 
       // Reset form
@@ -133,9 +154,10 @@ export function RequestFunding() {
       setMilestones([]);
 
     } catch (error) {
+      console.error("Error creating project:", error);
       toast({
         title: "Error Creating Project",
-        description: "Something went wrong. Please try again.",
+        description: "Failed to create project on the blockchain. Please try again.",
         variant: "destructive"
       });
     } finally {

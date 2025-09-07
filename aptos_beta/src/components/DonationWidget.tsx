@@ -7,6 +7,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
 import { projectStore } from "@/lib/projectStore";
+import { useWallet } from "@aptos-labs/wallet-adapter-react";
+import { donateToProject } from "@/entry-functions/donateToProject";
+import { projectExists } from "@/view-functions/charitableFunding";
 import { 
   DollarSign, 
   Heart, 
@@ -32,11 +35,23 @@ export function DonationWidget({
   onDonationComplete 
 }: DonationWidgetProps) {
   const { toast } = useToast();
+  const { signAndSubmitTransaction, account } = useWallet();
   const [donationAmount, setDonationAmount] = useState("");
   const [donorName, setDonorName] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
 
   const quickAmounts = [25, 50, 100, 250, 500];
+
+  // Helper function to convert local project ID to blockchain project ID
+  const getBlockchainProjectId = (localProjectId: string): number => {
+    // Local project IDs are strings like "1", "2", "3"
+    // Blockchain project IDs are numbers starting from 0
+    const localId = parseInt(localProjectId, 10);
+    if (isNaN(localId) || localId < 1) {
+      throw new Error(`Invalid project ID: ${localProjectId}`);
+    }
+    return localId - 1; // Convert from 1-based to 0-based
+  };
 
   // Get current donation target information
   const getDonationTargetInfo = () => {
@@ -80,22 +95,60 @@ export function DonationWidget({
 
     setIsProcessing(true);
 
-    // Simulate payment processing
     try {
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Get donation target information for the milestone
+      const targetInfo = getDonationTargetInfo();
+      if (!targetInfo.milestoneId) {
+        throw new Error(targetInfo.reason);
+      }
+      
+      // Validate that the project exists on the blockchain
+      // Convert local project ID to blockchain project ID
+      let blockchainProjectId: number;
+      let projectExistsOnChain = false;
+      
+      try {
+        blockchainProjectId = getBlockchainProjectId(projectId);
+        projectExistsOnChain = await projectExists(blockchainProjectId);
+      } catch (error) {
+        console.warn("Error checking project existence on blockchain:", error);
+        // Continue with local-only donation for demo purposes
+        blockchainProjectId = 0; // fallback value
+      }
+      
+      // Convert amount to blockchain format (octas)
+      const donationAmountOctas = BigInt(amount * 10**8);
+      
+      // Get donor address from the connected wallet
+      const donorAddress = account?.address?.toString() || "0x1234567890abcdef";
+      
+      // Only attempt blockchain transaction if project exists on-chain
+      if (projectExistsOnChain) {
+        // Create the transaction payload - use the blockchain project ID
+        const transaction = donateToProject({
+          projectId: blockchainProjectId,
+          amount: donationAmountOctas,
+        });
 
-      // Use smart donation system to automatically assign to the right milestone
-      const result = projectStore.addSmartDonation(
+        // Submit the transaction to the blockchain
+        const result = await signAndSubmitTransaction(transaction);
+        console.log("Donation transaction submitted:", result);
+      } else {
+        console.log("Project not on blockchain - proceeding with local-only demo donation");
+      }
+
+      // After blockchain transaction is successful, update local state
+      const localResult = projectStore.addSmartDonation(
         projectId,
         amount,
-        "0x1234567890abcdef", // This would come from wallet connection
+        donorAddress,
         donorName.trim() || "Anonymous Donor"
       );
 
-      if (result.success) {
+      if (localResult.success) {
         toast({
           title: "Donation Secured in Escrow! 🎉",
-          description: `Thank you for donating $${amount.toLocaleString()} to ${projectTitle}! ${result.message}. Funds are safely held in escrow.`
+          description: `Thank you for donating $${amount.toLocaleString()} to ${projectTitle}! ${localResult.message}. Funds are safely held in escrow ${projectExistsOnChain ? "on the blockchain" : "in demo mode"}.`
         });
 
         // Reset form
@@ -105,13 +158,21 @@ export function DonationWidget({
         // Notify parent component
         onDonationComplete?.();
       } else {
-        throw new Error(result.message);
+        throw new Error(localResult.message);
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Something went wrong. Please try again.";
+      console.error("Donation error:", error);
+      
+      // Provide more helpful error messages for common issues
+      let userFriendlyMessage = errorMessage;
+      if (errorMessage.includes("PROJECT_DOESNT_EXIST") || errorMessage.includes("non-existent project")) {
+        userFriendlyMessage = "This project doesn't exist on the blockchain yet. You can still support it in demo mode, but on-chain transactions aren't available.";
+      }
+      
       toast({
         title: "Donation Failed",
-        description: errorMessage,
+        description: userFriendlyMessage,
         variant: "destructive"
       });
     } finally {

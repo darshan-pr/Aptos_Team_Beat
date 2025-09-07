@@ -137,6 +137,22 @@ export function FeaturesSection() {
             ))}
           </div>
         </div>
+        
+        {/* Demo Section */}
+        <div className="mt-20 text-center">
+          <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-6">
+            Try Our Demo
+          </h2>
+          <p className="text-xl md:text-2xl text-gray-600 max-w-4xl mx-auto mb-10 leading-relaxed">
+            Experience our blockchain-based charitable funding system in action.
+          </p>
+          <a 
+            href="/demo/charitable-funding" 
+            className="inline-block bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white font-bold py-4 px-8 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1"
+          >
+            Launch Charitable Funding Demo
+          </a>
+        </div>
       </div>
     </div>
   );
